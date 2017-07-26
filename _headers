@@ -3,6 +3,7 @@
   Link: </bower_components/webcomponentsjs/custom-elements-es5-adapter.js>; rel=preload; as=script
 
 /
+  Link: </elements/app-shell.html>; rel=preload; as=document
   Link: </elements/views/view-host.html>; rel=preload; as=document
   Link: </elements/views/view-join.html>; rel=preload; as=document
   Link: </elements/views/view-party.html>; rel=preload; as=document
