@@ -63,6 +63,20 @@
     <app-shell></app-shell>
 
     <script>
+        console.log = function() {
+            console.log(arguments);
+
+            const p = document.createElement('p');
+            p.style.color = '#fff';
+            p.textContent = arguments.join(' ');
+
+            document.body.appendChild(p);
+        };
+
+        window.onerror = console.log;
+    </script>
+
+    <script>
         window.isHost = false;
         window.isWeb = true;
     </script>
