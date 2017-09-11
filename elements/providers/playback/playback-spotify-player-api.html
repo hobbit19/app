@@ -1,0 +1,212 @@
+<link rel="import" href="../../../bower_components/polymer/polymer-element.html">
+<link rel="import" href="../../../bower_components/oauth-authorizator/oauth-authorizator.html">
+<link rel="import" href="../../behaviors/behavior-fire-events.html">
+<link rel="import" href="../../behaviors/behavior-playback-provider.html">
+<link rel="import" href="../../utils/fetch.html">
+<link rel="import" href="../../utils/lodash.html">
+
+<dom-module id="playback-spotify-player-api">
+    <template>
+        <oauth-authorizator id="auth"
+                            access-token="{{state.auth.spotify}}"
+                            authorization-url="https://accounts.spotify.com/authorize"
+                            client-id="[[state.config.spotify.clientId]]"
+                            redirect-url="[[state.config.spotify.redirectUrl]]"
+                            scopes="[[state.config.spotify.scopes]]"
+                            token-exchange-url="[[state.config.spotify.tokenExchangeUrl]]"
+                            token-refresh-url="[[state.config.spotify.tokenRefreshUrl]]">
+        </oauth-authorizator>
+    </template>
+</dom-module>
+
+<script>
+    class SpotifyPlayerApiPlayback extends Festify.FireBehavior(
+        Festify.PlaybackProviderBehavior(Polymer.Element)
+    ) {
+        static get is() {
+            return 'playback-spotify-player-api';
+        }
+
+        static get properties() {
+            return {
+                state: {
+                    type: Object,
+                    notify: true
+                },
+                _currentTrack: {
+                    type: String
+                },
+                _deviceId: {
+                    type: String
+                },
+                _lastPlayingState: {
+                    type: Boolean
+                },
+                _lastTimestamp: {
+                    type: Number
+                },
+                _interval: {
+                    type: Number
+                }
+            };
+        }
+
+        init() {
+            return this.$.auth.login()
+                .then(() => this._fetchAuthed(SpotifyPlayerApiPlayback.SPOTIFY_DEVICES_URL))
+                .then(resp => resp.json())
+                .then(({ devices }) => devices.find(dev => dev.type === 'Computer' && !dev.is_restricted))
+                .then(dev => this._deviceId = encodeURIComponent(dev.id));
+        }
+
+        deinit() {
+            return this.pause();
+        }
+
+        play(ref) {
+            if (!this._deviceId) {
+                return Promise.reject(new Error("Missing device ID to play on. Did the playback initialize properly?"));
+            }
+
+            clearInterval(this._interval);
+            this._interval = null;
+
+            const url = `${SpotifyPlayerApiPlayback.SPOTIFY_PLAY_URL}?device_id=${this._deviceId}`;
+            let p;
+            if (ref) {
+                this.fire('player', { type: 'scroll', posMs: 0 });
+
+                const uri = typeof ref !== 'string' ? 'spotify:track:' + ref.id : ref;
+                this._currentTrack = uri;
+                p = this._fetchAuthed(url, {
+                    body: JSON.stringify({ uris: [uri] }),
+                    headers: { 'Content-Type': 'application/json' },
+                    method: 'put'
+                });
+            } else {
+                p = this._fetchAuthed(url, { method: 'put' });
+            }
+
+            return p.then(() => this._interval = setInterval(() => this._checkStatus(), 1000));
+        }
+
+        pause() {
+            if (!this._deviceId) {
+                return Promise.reject(new Error("Missing device ID to pause. Did the playback initialize properly?"));
+            }
+
+            const url = `${SpotifyPlayerApiPlayback.SPOTIFY_PAUSE_URL}?device_id=${this._deviceId}`;
+            return this._fetchAuthed(url, { method: 'put' });
+        }
+
+        getUsername() {
+            return this._fetchJson(SpotifyPlayerApiPlayback.SPOTIFY_ME_URL)
+                .then(({ display_name, id }) => display_name || id);
+        }
+
+        getPosition() {
+            return this._fetchJson(SpotifyPlayerApiPlayback.SPOTIFY_PLAYBACKSTATE_URL)
+                .then(({ progress_ms }) => progress_ms);
+        }
+
+        getProviders() {
+            return ['spotify'];
+        }
+
+        isAvailable() {
+            return !!window.require;
+        }
+
+        _checkStatus() {
+            this._fetchJson(SpotifyPlayerApiPlayback.SPOTIFY_PLAYBACKSTATE_URL)
+                .then(({ is_playing, item, progress_ms, timestamp }) => {
+                    // Ensure we don't run when either the interval has been cleared
+                    // or we're coming in late (network can be really slow).
+                    if (!this._interval || timestamp < this._lastTimestamp) {
+                        return;
+                    }
+                    this._lastTimestamp = timestamp;
+
+                    if (is_playing && this._currentTrack && item.uri !== this._currentTrack) {
+                        this.play(this._currentTrack);
+
+                        this.fire('toast', {
+                            text: "Somebody tried to change the current track in Spotify, but he didn't know our true power! We just changed back to your queue. ¯\\_(ツ)_/¯"
+                        });
+
+                        return;
+                    }
+
+                    if (this._lastPlayingState && progress_ms === 0) {
+                        this._lastPlayingState = false;
+
+                        this._interval = clearInterval(this._interval);
+                        this.fire('player', { type: 'finished' });
+                        return;
+                    }
+
+                    this.fire('player', { type: 'scroll', posMs: progress_ms });
+
+                    if (is_playing !== this._lastPlayingState) {
+                        this._lastPlayingState = is_playing;
+                        this.fire('player', { type: is_playing ? 'play' : 'pause' });
+                    }
+                })
+                .catch(err => console.warn("Failed to get Spotify player state.", err));
+        }
+
+        _fetchAuthed(url, options = {}) {
+            let failedAttempt = 0;
+            let retryAttempt = 0;
+
+            const attempt = () => {
+                return fetch(url, _.merge(options, {
+                    headers: {
+                        'Authorization': `Bearer ${this.get('state.auth.spotify')}`
+                    }
+                }))
+                    .catch(err => {
+                        if (++failedAttempt <= 10) {
+                            return new Promise((res, rej) => {
+                                setTimeout(() => attempt().then(res).catch(rej), 2000);
+                            });
+                        } else {
+                            return Promise.reject(err);
+                        }
+                    })
+                    .then(resp => {
+                        if (!resp.ok) {
+                            return Promise.reject(resp);
+                        }
+
+                        if (resp.status === 202) { // Spotify says try again after 5s
+                            if (++retryAttempt <= 5) {
+                                return new Promise((res, rej) => {
+                                    setTimeout(() => attempt().then(res).catch(rej), 5000);
+                                });
+                            } else {
+                                return Promise.reject(new Error(`Could not perform request to ${url}. Maximum amount of attempts reached.`));
+                            }
+                        } else {
+                            return resp;
+                        }
+                    });
+            };
+
+            return attempt();
+        }
+
+        _fetchJson(url, options) {
+            return this._fetchAuthed(url, options)
+                .then(resp => resp.json());
+        }
+    }
+
+    SpotifyPlayerApiPlayback.SPOTIFY_DEVICES_URL = 'https://api.spotify.com/v1/me/player/devices';
+    SpotifyPlayerApiPlayback.SPOTIFY_ME_URL = 'https://api.spotify.com/v1/me/player/devices';
+    SpotifyPlayerApiPlayback.SPOTIFY_PLAY_URL = 'https://api.spotify.com/v1/me/player/play';
+    SpotifyPlayerApiPlayback.SPOTIFY_PAUSE_URL = 'https://api.spotify.com/v1/me/player/pause';
+    SpotifyPlayerApiPlayback.SPOTIFY_PLAYBACKSTATE_URL = 'https://api.spotify.com/v1/me/player';
+
+    customElements.define(SpotifyPlayerApiPlayback.is, SpotifyPlayerApiPlayback);
+</script>
