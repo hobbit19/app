@@ -39,6 +39,9 @@
                 _deviceId: {
                     type: String
                 },
+                _devices: {
+                    type: Array
+                },
                 _lastPlayingState: {
                     type: Boolean
                 },
@@ -51,19 +54,39 @@
             };
         }
 
+        static get observers() {
+            return [
+                '_deviceToPlayOnChanged(state.playback.spotify.device)'
+            ];
+        }
+
         init() {
             return this.$.auth.login()
-                .then(() => this._fetchAuthed(SpotifyPlayerApiPlayback.SPOTIFY_DEVICES_URL))
-                .then(resp => resp.json())
-                .then(({ devices }) => devices.find(dev => dev.type === 'Computer' && !dev.is_restricted))
-                .then(dev => this._deviceId = encodeURIComponent(dev.id));
+                .then(() => this._fetchJson(SpotifyPlayerApiPlayback.SPOTIFY_DEVICES_URL))
+                .then(({ devices }) => {
+                    const playable = devices.filter(dev => dev && !dev.is_restricted);
+                    this._devices = playable;
+                    _.set(this.state, 'playback.spotify.devices', playable);
+                    this.notifyPath('state.playback.spotify.devices');
+                    this.set('state.playback.spotify.device', (playable[0] || {}).id);
+                });
         }
 
         deinit() {
-            return this.pause();
+            const clearInterval = () => {
+                clearInterval(this._interval);
+                this._interval = null;
+            };
+
+            return this.pause()
+                .then(clearInterval)
+                .catch(err => {
+                    clearInterval();
+                    return Promise.reject(err);
+                });
         }
 
-        play(ref) {
+        play(ref, fromPos) {
             if (!this._deviceId) {
                 return Promise.reject(new Error("Missing device ID to play on. Did the playback initialize properly?"));
             }
@@ -79,7 +102,10 @@
                 const uri = typeof ref !== 'string' ? 'spotify:track:' + ref.id : ref;
                 this._currentTrack = uri;
                 p = this._fetchAuthed(url, {
-                    body: JSON.stringify({ uris: [uri] }),
+                    body: JSON.stringify({
+                        uris: [uri],
+                        offset: fromPos ? { position: fromPos } : undefined
+                    }),
                     headers: { 'Content-Type': 'application/json' },
                     method: 'put'
                 });
@@ -119,12 +145,15 @@
 
         _checkStatus() {
             this._fetchJson(SpotifyPlayerApiPlayback.SPOTIFY_PLAYBACKSTATE_URL)
-                .then(({ is_playing, item, progress_ms, timestamp }) => {
+                .then(({ device, is_playing, item, progress_ms, timestamp }) => {
                     // Ensure we don't run when either the interval has been cleared
                     // or we're coming in late (network can be really slow).
                     if (!this._interval || timestamp < this._lastTimestamp) {
                         return;
                     }
+
+                    // Save device ID so that we can follow the user across devices
+                    this._deviceId = device.id;
                     this._lastTimestamp = timestamp;
 
                     if (is_playing && this._currentTrack && item.uri !== this._currentTrack) {
@@ -200,10 +229,31 @@
             return this._fetchAuthed(url, options)
                 .then(resp => resp.json());
         }
+
+        _deviceToPlayOnChanged(deviceId) {
+            // Automatically transfer playback to new device
+            if (this._interval && this._lastPlayingState) {
+                this.pause()
+                    .then(() => this._fetchAuthed(SpotifyPlayerApiPlayback.SPOTIFY_PLAYBACKSTATE_URL, {
+                        body: JSON.stringify({
+                            device_ids: [deviceId],
+                            play: true
+                        }),
+                        headers: { 'Content-Type': 'application/json' },
+                        method: 'put'
+                    }))
+                    .catch(err => {
+                        console.error(err);
+                        this.fire('toast', { text: "Failed to automatically switch playback. Sorry!" });
+                    });
+            }
+
+            this._deviceId = deviceId || (this._devices || [])[0];
+        }
     }
 
     SpotifyPlayerApiPlayback.SPOTIFY_DEVICES_URL = 'https://api.spotify.com/v1/me/player/devices';
-    SpotifyPlayerApiPlayback.SPOTIFY_ME_URL = 'https://api.spotify.com/v1/me/player/devices';
+    SpotifyPlayerApiPlayback.SPOTIFY_ME_URL = 'https://api.spotify.com/v1/me';
     SpotifyPlayerApiPlayback.SPOTIFY_PLAY_URL = 'https://api.spotify.com/v1/me/player/play';
     SpotifyPlayerApiPlayback.SPOTIFY_PAUSE_URL = 'https://api.spotify.com/v1/me/player/pause';
     SpotifyPlayerApiPlayback.SPOTIFY_PLAYBACKSTATE_URL = 'https://api.spotify.com/v1/me/player';

@@ -1,6 +1,9 @@
 <link rel="import" href="../../bower_components/polymer/polymer-element.html">
+<link rel="import" href="../../bower_components/polymer/lib/elements/dom-if.html">
 <link rel="import" href="../../bower_components/polymer/lib/elements/dom-repeat.html">
 <link rel="import" href="../../bower_components/paper-input/paper-input.html">
+<link rel="import" href="../../bower_components/paper-item/paper-item.html">
+<link rel="import" href="../../bower_components/paper-listbox/paper-listbox.html">
 <link rel="import" href="../providers/provider-playlists.html">
 <link rel="import" href="components/fallback-playlist.html">
 <link rel="import" href="components/festify-spinner.html">
@@ -23,6 +26,10 @@
             h3 {
                 border-bottom: 1px solid #333;
                 margin-bottom: 0;
+            }
+
+            paper-listbox {
+                --paper-listbox-background-color: rgba(0, 0, 0, 0);
             }
 
             fallback-playlist {
@@ -49,6 +56,15 @@
                          title="Change the name of your party"
                          type="text">
             </paper-input>
+
+            <template is="dom-if" if="[[state.playback.spotify.devices]]">
+                <h3>Spotify Output Device</h3>
+                <paper-listbox attr-for-selected="data-id" selected="{{state.playback.spotify.device}}">
+                    <template is="dom-repeat" items="[[state.playback.spotify.devices]]">
+                        <paper-item data-id$="[[item.id]]">[[item.name]]</paper-item>
+                    </template>
+                </paper-listbox>
+            </template>
         </div>
 
         <div class="lower">
