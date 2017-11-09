@@ -1,9 +1,11 @@
 <link rel="import" href="../../bower_components/polymer/polymer-element.html">
 <link rel="import" href="../../bower_components/polymer/lib/elements/dom-if.html">
 <link rel="import" href="../../bower_components/polymer/lib/elements/dom-repeat.html">
+<link rel="import" href="../../bower_components/paper-icon-button/paper-icon-button.html">
 <link rel="import" href="../../bower_components/paper-input/paper-input.html">
 <link rel="import" href="../../bower_components/paper-item/paper-item.html">
 <link rel="import" href="../../bower_components/paper-listbox/paper-listbox.html">
+<link rel="import" href="../behaviors/behavior-fire-events.html">
 <link rel="import" href="../providers/provider-playlists.html">
 <link rel="import" href="components/fallback-playlist.html">
 <link rel="import" href="components/festify-spinner.html">
@@ -30,6 +32,11 @@
 
             paper-listbox {
                 --paper-listbox-background-color: rgba(0, 0, 0, 0);
+            }
+
+            paper-icon-button {
+                display: block;
+                margin: auto;
             }
 
             fallback-playlist {
@@ -64,6 +71,10 @@
                         <paper-item data-id$="[[item.id]]">[[item.name]]</paper-item>
                     </template>
                 </paper-listbox>
+                <paper-icon-button icon="autorenew"
+                                   on-tap="_refreshDeviceList"
+                                   title="Refresh List">
+                </paper-icon-button>
             </template>
         </div>
 
@@ -87,7 +98,7 @@
 </dom-module>
 
 <script>
-    class SettingsView extends Polymer.Element {
+    class SettingsView extends Festify.FireBehavior(Polymer.Element) {
         static get is() {
             return 'view-settings';
         }
@@ -118,6 +129,10 @@
             const ref = this.get('reference', list);
             const ref2 = this.get('base.reference', playlistChange);
             return _.isEqual(ref, ref2);
+        }
+
+        _refreshDeviceList() {
+            this.fire('refresh-spotifyDeviceList');
         }
     }
 

@@ -42,6 +42,9 @@
                 _devices: {
                     type: Array
                 },
+                _deviceRefreshHandler: {
+                    type: Function
+                },
                 _lastPlayingState: {
                     type: Boolean
                 },
@@ -60,16 +63,26 @@
             ];
         }
 
+        connectedCallback() {
+            super.connectedCallback();
+
+            this._deviceRefreshHandler = () => this._refreshDevices();
+            window.addEventListener('refresh-spotifyDeviceList', this._deviceRefreshHandler);
+        }
+
+        disconnectedCallback() {
+            super.disconnectedCallback();
+
+            window.removeEventListener('refresh-spotifyDeviceList', this._deviceRefreshHandler);
+        }
+
         init() {
             return this.$.auth.login()
-                .then(() => this._fetchJson(SpotifyPlayerApiPlayback.SPOTIFY_DEVICES_URL))
-                .then(({ devices }) => {
-                    const playable = devices.filter(dev => dev && !dev.is_restricted);
-                    this._devices = playable;
-                    _.set(this.state, 'playback.spotify.devices', playable);
-                    this.notifyPath('state.playback.spotify.devices');
-                    this.set('state.playback.spotify.device', (playable[0] || {}).id);
-                });
+                .then(() => this._refreshDevices())
+                .then(() => this.set(
+                    'state.playback.spotify.device',
+                    (this._devices[0] || {}).id
+                ));
         }
 
         deinit() {
@@ -249,6 +262,16 @@
             }
 
             this._deviceId = deviceId || (this._devices || [])[0];
+        }
+
+        _refreshDevices() {
+            return this._fetchJson(SpotifyPlayerApiPlayback.SPOTIFY_DEVICES_URL)
+                .then(({ devices }) => {
+                    const playable = devices.filter(dev => dev && !dev.is_restricted);
+                    this._devices = playable;
+                    _.set(this.state, 'playback.spotify.devices', playable);
+                    this.notifyPath('state.playback.spotify.devices');
+                });
         }
     }
 
