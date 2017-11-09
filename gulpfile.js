@@ -7,6 +7,7 @@ const dotenv = require('dotenv');
 const gulp = require('gulp');
 const prompt = require('prompt');
 const runSequence = require('run-sequence');
+const bump = require('gulp-bump');
 
 dotenv.config({ path: '.env-default' });
 
@@ -15,9 +16,9 @@ require('./scripts/gulp-polymer');
 require('./scripts/gulp-watch');
 
 // Build bases
-gulp.task('build:web', ['polymer', 'generate-icons']);
+gulp.task('build:web', ['polymer', 'generate-icons', 'prepare-version']);
 gulp.task('build:mobile', ['polymer-cordova', 'generate-splash-screens', 'generate-icons']);
-gulp.task('build:desktop', ['polymer-electron']);
+gulp.task('build:desktop', ['polymer-electron', 'prepare-version']);
 
 // User-facing tasks
 gulp.task('build', ['clean'], function(cb) {
@@ -76,23 +77,11 @@ gulp.task('release:cordova:android', ['release:cordova:android-apk'], function()
         .pipe(gulp.dest('build-mobile'));
 });
 
-gulp.task('release:electron', ['build-electron'], function () {
-    process.chdir('./electron');
+const bumpVersion = (type) => gulp.src(['./package.json', './electron/package.json', './config.xml'], {base: '.'})
+    .pipe(bump({type: type}))
+    .pipe(gulp.dest('./'));
 
-    return Promise.all([
-        builder.build({
-            targets: builder.Platform.WINDOWS.createTarget(
-                'nsis',
-                builder.Arch.x64,
-                builder.Arch.ia32
-            ),
-            config: config.electron,
-            publish: 'always'
-        }),
-        builder.build({
-            targets: builder.Platform.MAC.createTarget(),
-            config: config.electron,
-            publish: 'always'
-        })
-    ]);
-});
+gulp.task('bump', () => bumpVersion('patch'));
+gulp.task('bump:patch', () => bumpVersion('patch'));
+gulp.task('bump:minor', () => bumpVersion('minor'));
+gulp.task('bump:major', () => bumpVersion('major'));
