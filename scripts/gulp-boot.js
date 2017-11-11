@@ -24,7 +24,8 @@ async function getBranch() {
         } catch (e) {
             rej(e);
         }
-    });
+    })
+        .then(branchName => branchName.replace('/', '-'));
 }
 
 gulp.task('configure', ['prepare-env'], function() {
